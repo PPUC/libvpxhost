@@ -1,0 +1,55 @@
+name: libvpxhost
+
+on:
+  push:
+  pull_request:
+
+# The plugin SDK comes from PPUC's vpinball fork at the commit ppuc pins
+# (VPINBALL_SHA in ppuc/platforms/config.sh); keep the two in step.
+env:
+  VPINBALL_SHA: 5330759c6d5d26eebbec4f275884d97c93dc03c4
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-24.04, shell: bash }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, shell: bash }
+          - { name: macos-arm64, os: macos-15, shell: bash }
+          - { name: win-mingw-x64, os: windows-latest, shell: 'msys2 {0}' }
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            git
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Fetch the vpinball plugin SDK
+        run: |
+          git init -q external/vpinball
+          cd external/vpinball
+          git remote add origin https://github.com/PPUC/vpinball.git
+          git sparse-checkout set --no-cone /plugins/plugins/ /third-party/include/mINI/ /third-party/include/plog/ /third-party/include/unordered_dense.h /third-party/include/stl.h
+          git fetch -q --depth 1 --filter=blob:none origin "${VPINBALL_SHA}"
+          git checkout -q FETCH_HEAD
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DVPXHOST_VPINBALL_DIR=external/vpinball
+          cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
